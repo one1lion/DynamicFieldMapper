@@ -1,0 +1,234 @@
+﻿@page "/map"
+
+@using System.Data
+@using System.IO
+@using System.Linq
+
+@inject FieldMapperService FieldMapperService
+
+<h3>FileMapping</h3>
+<InputFile OnChange="HandleFileSelected" />
+@if (!string.IsNullOrWhiteSpace(errorMessage)) {
+  <p class="text-danger">@errorMessage</p>
+} else if (savePerformed) {
+  <p class="text-success">Saved!</p>
+}
+@if (fileLoaded) {
+  if (!headers.Any()) {
+    <p>No Header Row detected</p>
+  } else {
+    <EditForm Model="model" OnValidSubmit="HandleSaveTemplate" @ref="editForm">
+      <DataAnnotationsValidator />
+
+      <div class="container">
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Template Name <span class="text-danger">*</span></label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.TemplateName" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.TemplateName" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Company <span class="text-danger">*</span></label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.Company" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.Company" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Product <span class="text-danger">*</span></label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.Product" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.Product" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Quantity <span class="text-danger">*</span></label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.Quantity" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.Quantity" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Effective Date <span class="text-danger">*</span></label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.EffectiveDate" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.EffectiveDate" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Less Included</label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.LessIncluded" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.LessIncluded" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Unit Cost</label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.UnitCost" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.UnitCost" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Unit Price</label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.UnitPrice" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.UnitPrice" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Cancel Date</label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.CancelDate" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.CancelDate" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Sequence</label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.Sequence" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.Sequence" class="text-danger" />
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <label>Serial Number</label>
+          </div>
+          <div class="col-6">
+            <InputText @bind-Value="model.SerialNumber" list="availFields" maxlength="60" disabled="@(formDisabled)" />
+            <ValidationMessage For="() => model.SerialNumber" class="text-danger" />
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" disabled="@(formDisabled)">Submit</button>
+    </EditForm>
+    <datalist id="availFields">
+      @foreach (var unusedField in unusedHeaders) {
+        <option value="@unusedField"></option>
+      }
+    </datalist>
+  }
+}
+
+@code {
+  bool fileLoaded;
+  bool savePerformed;
+  bool formDisabled => savePerformed && string.IsNullOrWhiteSpace(errorMessage);
+  ImportFile model = new ImportFile();
+  List<string> headers;
+
+  List<string> usedHeaders => model.GetProperties().Select(x => (string)x).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+  List<string> unusedHeaders => !(headers?.Any() ?? false) ? new List<string>()
+    : headers.Where(x => !usedHeaders.Any(y => x == y)).ToList();
+
+  string errorMessage;
+
+  EditForm editForm;
+
+  async Task HandleFileSelected(InputFileChangeEventArgs e) {
+    errorMessage = null;
+    fileLoaded = false;
+    headers = new List<string>();
+
+    try {
+      var dt = await FileUtils.ProcessFile(e.File.OpenReadStream(), e.File.ContentType, e.File.Name);
+
+      for (int i = 0; i < dt.Columns.Count; i++) {
+        headers.Add(dt.Columns[i].ColumnName);
+      }
+      fileLoaded = true;
+      if (string.IsNullOrWhiteSpace(model.TemplateName)) {
+        model.TemplateName = Path.GetFileNameWithoutExtension(e.File.Name);
+      }
+      PrepopulateFields();
+      StateHasChanged();
+    } catch (IOException ex) {
+      errorMessage = ex.Message;
+#if DEBUG
+      Console.Error.WriteLine(ex);
+#endif
+    } catch (Exception ex) {
+      errorMessage = "An unknown error has occurred.";
+#if DEBUG
+      Console.Error.WriteLine(ex);
+#endif
+    } finally {
+      StateHasChanged();
+    }
+  }
+
+  void PrepopulateFields() {
+    var fldMaps = model.GetPropertiesWithValsAndSetter();
+    foreach (var (mapField, headerField, setValue) in fldMaps) {
+      var curHeader = (string)headerField;
+      var possibleMatch = headers.FirstOrDefault(x => x.Contains(mapField));
+      if (string.IsNullOrWhiteSpace(curHeader)) {
+        setValue(possibleMatch);
+      }
+    }
+  }
+
+  async Task HandleSaveTemplate(EditContext editContext) {
+    if (formDisabled) {
+      return;
+    }
+    errorMessage = null;
+
+    try {
+      // Can do extra validation;
+      // e.g. not allowed to map the same field twice
+      //    - field names must match read in headers
+      var fldMaps = model.GetPropertiesWithValsAndSetter();
+      var hadErrors = false;
+      foreach (var (mapField, headerField, setValue) in fldMaps) {
+        var curHeader = (string)headerField;
+        if (!string.IsNullOrWhiteSpace(curHeader) && !headers.Contains(curHeader)) {
+          setValue("_invalid_");
+          hadErrors = true;
+        }
+      }
+      if (hadErrors) {
+        StateHasChanged();
+        errorMessage = "Only field names read from the template can be mapped.";
+        editContext.Validate();
+        return;
+      }
+      Console.WriteLine("Submit to the database");
+      await FieldMapperService.SaveTemplate(model);
+    } catch (Exception ex) {
+      errorMessage = "An error occured while trying to save the template to the server.";
+#if DEBUG
+      Console.Error.WriteLine(ex);
+#endif
+    }
+  }
+
+  void ValidateInputValue(ChangeEventArgs e, string mappableFieldName) {
+    // TODO: Make sure that the input value
+    Console.WriteLine(usedHeaders.Count);
+    Console.WriteLine(unusedHeaders.Count);
+    StateHasChanged();
+  }
+}

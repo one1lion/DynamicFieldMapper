@@ -1,0 +1,209 @@
+﻿@page "/import"
+@using System.Data
+@using System.IO
+@inject FieldMapperService FieldMapperService
+@inject NavigationManager NavigationManager
+
+<h3>Import Data</h3>
+<InputFile OnChange="HandleFileSelected" />
+@if (resp?.WasError ?? false) {
+  @((MarkupString)resp.AsHtml())
+}
+@if (importedData is null) {
+  if (importing) {
+    <p>Processing file, please wait...</p>
+  } else if (importPerformed) {
+    <p class="text-danger">Could not import data from the provided file.</p>
+  } else {
+    <p>Choose a file to import</p>
+  }
+} else {
+  if (possibleTemplates?.Any() ?? false) {
+    <label>Detected Template@(possibleTemplates.Count > 1 ? "s" : ""): </label>
+    if (possibleTemplates.Count > 1) {
+      <select class="form-control" @onchange="HandleTemplateSelected">
+        @foreach (var curTemplate in possibleTemplates) {
+          <option value="@curTemplate.TemplateName">curTemplate.TemplateName</option>
+        }
+      </select>
+    } else {
+      <label class="form-control">@possibleTemplates.First().TemplateName</label>
+    }
+    //TODO: Add preview/edit button to preview/edit the template mappings
+    <table class="table table-striped table-hover table-bordered">
+      <thead>
+        <tr>
+          @*@foreach (DataColumn col in importedData.Columns) {
+              <th>@col.ColumnName</th>
+            }*@
+          <th>Company</th>
+          <th>Product</th>
+          <th>Quantity</th>
+          <th>EffectiveDate</th>
+          <th>LessIncluded</th>
+          <th>UnitCost</th>
+          <th>UnitPrice</th>
+          <th>CancelDate</th>
+          <th>Sequence</th>
+          <th>SerialNumber</th>
+        </tr>
+      </thead>
+      <tbody>
+        @*@foreach (DataRow row in importedData.Rows) {
+            <tr>
+              @foreach (DataColumn col in importedData.Columns) {
+                <td>@row[col.ColumnName]</td>
+              }
+            </tr>
+          }*@
+        @if (transformedData is null) {
+          <tr><td colspan="10">Transforming Data, please wait...</td></tr>
+        } else if (!transformedData.Any()) {
+          <tr><td colspan="10">No data</td></tr>
+        } else {
+          foreach (var curData in transformedData) {
+            <tr>
+              <td>@curData.Company</td>
+              <td>@curData.Product</td>
+              <td>@curData.Quantity</td>
+              <td>@curData.EffectiveDate</td>
+              <td>@curData.LessIncluded</td>
+              <td>@curData.UnitCost</td>
+              <td>@curData.UnitPrice</td>
+              <td>@curData.CancelDate</td>
+              <td>@curData.Sequence</td>
+              <td>@curData.SerialNumber</td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  } else {
+    // TODO: Put the Field Mapping component here
+    // After user saves the mapping, add that ImportFile object to possibleTemplates
+    <p>No template has been created, please <span style="color:blue;cursor:pointer;text-decoration:underline" @onclick="GoToFieldMapping">map the fields</span> first and try again</p>
+  }
+}
+
+@code {
+  ImportFile currentTemplate;
+  List<ImportFile> possibleTemplates;
+  DataTable importedData;
+  List<ImportFileData> transformedData;
+  DataView templateAppliedView;
+
+  bool hasCompany => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.Company)));
+  bool hasProduct => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.Product)));
+  bool hasQuantity => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.Quantity)));
+  bool hasEffectiveDate => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.EffectiveDate)));
+  bool hasLessIncluded => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.LessIncluded)));
+  bool hasUnitCost => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.UnitCost)));
+  bool hasUnitPrice => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.UnitPrice)));
+  bool hasCancelDate => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.CancelDate)));
+  bool hasSequence => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.Sequence)));
+  bool hasSerialNumber => !string.IsNullOrWhiteSpace((string)currentTemplate?.GetValue(nameof(ImportFile.SerialNumber)));
+
+
+
+  bool importPerformed;
+  bool importing;
+  ResponseModel<List<ImportFile>> resp;
+
+  protected override void OnInitialized() {
+    Console.WriteLine($"Nullable Double Default: {default(double?)}\r\nNullable Int Default: {default(int?)}");
+  }
+
+  async Task HandleFileSelected(InputFileChangeEventArgs e) {
+    resp = new();
+    importPerformed = false;
+    importing = true;
+    importedData = default;
+    try {
+      importedData = await FileUtils.ProcessFile(e.File.OpenReadStream(), e.File.ContentType, e.File.Name);
+
+      importPerformed = true;
+
+      await SearchTemplates();
+
+      // TODO: Determine what tempaltes were and what to do with them
+    } catch (IOException ex) {
+      resp.AddError(ex.Message);
+#if DEBUG
+      Console.Error.WriteLine(ex);
+#endif
+    } catch (Exception ex) {
+      resp.AddError("An unknown error has occurred.");
+#if DEBUG
+      Console.Error.WriteLine(ex);
+#endif
+    } finally {
+      StateHasChanged();
+    }
+  }
+
+  async Task SearchTemplates() {
+    var headers = new List<string>();
+    for (int i = 0; i < importedData.Columns.Count; i++) {
+      headers.Add(importedData.Columns[i].ColumnName);
+    }
+    // sending the list of headers to the server to get back a list of possible template matches
+    resp = await FieldMapperService.SearchTemplates(headers);
+    if (resp.WasError) {
+      return;
+    }
+    possibleTemplates = resp.ReturnObject;
+    HandleTemplateSelected(new ChangeEventArgs() {
+      Value = possibleTemplates.FirstOrDefault()?.TemplateName
+    });
+  }
+
+  void HandleTemplateSelected(ChangeEventArgs e) {
+    // Apply the currently selected template
+    var selectedTemplate = possibleTemplates.SingleOrDefault(x => x.TemplateName == (string)e.Value);
+    if (selectedTemplate is null) {
+      // TODO: Some kind of error stuff for not being able to match
+      return;
+    }
+    ApplyTemplate(selectedTemplate);
+    StateHasChanged();
+  }
+
+  void ApplyTemplate(ImportFile template) {
+    transformedData = (from impData in importedData.AsEnumerable()
+                       select new ImportFileData() {
+                         Company = Parse<string>(impData, template.Company),
+                         Product = Parse<string>(impData, template.Product),
+                         Quantity = Parse<double>(impData, template.Quantity),
+                         EffectiveDate = Parse<DateTime>(impData, template.EffectiveDate),
+                         LessIncluded = Parse<double?>(impData, template.LessIncluded),
+                         UnitCost = Parse<double?>(impData, template.UnitCost),
+                         UnitPrice = Parse<double?>(impData, template.UnitPrice),
+                         CancelDate = Parse<DateTime?>(impData, template.CancelDate),
+                         Sequence = Parse<double?>(impData, template.Sequence),
+                         SerialNumber = Parse<string>(impData, template.SerialNumber)
+                       }).ToList();
+  }
+
+  void GoToFieldMapping() {
+    NavigationManager.NavigateTo("map");
+  }
+
+  private TValue Parse<TValue>(DataRow row, string columnName) {
+    var stringValue = row.GetValueAsString(columnName);
+    if (string.IsNullOrWhiteSpace(columnName) || string.IsNullOrWhiteSpace(stringValue)) {
+      return default(TValue);
+    }
+    switch (typeof(TValue)) {
+      case var t when t == typeof(DateTime):
+        return (TValue)Convert.ChangeType(DateTime.Parse(stringValue), typeof(TValue));
+      case var t when t == typeof(double):
+        return (TValue)Convert.ChangeType(double.Parse(stringValue), typeof(TValue));
+      case var t when t == typeof(DateTime?):
+        return (TValue)Convert.ChangeType(DateTime.Parse(stringValue), typeof(DateTime));
+      case var t when t == typeof(double?):
+        return (TValue)Convert.ChangeType(double.Parse(stringValue), typeof(double));
+      default:
+        return (TValue)Convert.ChangeType(stringValue, typeof(TValue));
+    }
+  }
+}
